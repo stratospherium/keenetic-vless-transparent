@@ -1,0 +1,61 @@
+#!/bin/sh
+# VLESS transparent proxy: xray + firewall for KVN + home segments.
+# FAIL-SAFE: firewall rules are applied ONLY after xray is confirmed running.
+CONF=/opt/etc/xray/config.json
+LOG=/opt/var/log/xray-vless.log
+WPID=/opt/var/run/vless-watchdog.pid
+
+watchdog_loop() {
+    while :; do
+        /opt/etc/xray/watchdog.sh >/dev/null 2>&1
+        sleep 60
+    done
+}
+
+start() {
+    if ! pidof xray >/dev/null 2>&1; then
+        # wait for WAN to come up after boot
+        UP=$(cut -d. -f1 /proc/uptime)
+        if [ "$UP" -lt 180 ]; then
+            sleep 45
+        fi
+        /opt/sbin/xray -c $CONF >>$LOG 2>&1 &
+        sleep 3
+    fi
+    if pidof xray >/dev/null 2>&1; then
+        /opt/etc/xray/fw.sh start
+        echo "xray running, rules applied"
+    else
+        /opt/etc/xray/fw.sh stop
+        echo "XRAY FAILED TO START - rules NOT applied (network stays direct)"
+        return 1
+    fi
+    mkdir -p /opt/var/run
+    if [ -f $WPID ] && kill -0 $(cat $WPID) 2>/dev/null; then
+        echo "watchdog already running"
+    else
+        watchdog_loop &
+        echo $! > $WPID
+        echo "watchdog started (pid $(cat $WPID))"
+    fi
+}
+
+stop() {
+    if [ -f $WPID ]; then
+        kill $(cat $WPID) 2>/dev/null
+        rm -f $WPID
+    fi
+    /opt/etc/xray/fw.sh stop
+    killall xray 2>/dev/null
+}
+
+case "$1" in
+    start) start ;;
+    stop) stop ;;
+    restart)
+        stop
+        sleep 1
+        start
+        ;;
+    *) echo "usage: $0 {start|stop|restart}" ;;
+esac
