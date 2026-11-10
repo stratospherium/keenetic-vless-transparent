@@ -33,6 +33,23 @@ VLESS + Reality + XHTTP + постквантовое шифрование (mlkem
 4. Транспортные опции: `sniffing.routeOnly` (маршрутизация по домену без подмены адреса —
    IP-правила продолжают работать при ECH), `xhttp stream-one`, BBR на VPS
 
+### Балансер и резервный канал
+
+Xray держит два исходящих канала до одного VDS-хоста и выбирает живой автоматически:
+
+- `prox-main` — VLESS + XHTTP + Reality + постквант (:443) — основной;
+- `prox-reserve` — VLESS + Reality + Vision (:8443) — резерв, другая транспортная логика;
+- `routing.balancers` + `leastPing` и `burstObservatory` (пинг обоих каналов раз в минуту) —
+  при деградации основного трафик сам переезжает на резерв без ручных действий;
+- `routeOnly: false` — xray резолвит домены на стороне VDS, «битые» для домашнего
+  DNS адреса перестают влиять на загрузку.
+
+Правила маршрутизации (порядок важен — частное раньше общего): второй сегмент → VDS,
+частные сети → напрямую, РФ-домены (category-ru) и geoip:ru → напрямую, кэш провайдера
+для заблокированного контента → VDS, известные сервисы → VDS, всё незнакомое зарубежное →
+VDS (дефолт-аутбаунд). Блокировки: домены Autodesk → blackhole; шифрованный DNS (DoT:853)
+проблемного устройства → REJECT; корпоративный мессенджер и игровые порты → мимо туннеля.
+
 ## Установка
 
 > Все шаги выполняются по SSH. Примеры даны для внутренней подсети 192.168.1.0/24.
@@ -64,12 +81,15 @@ vi /opt/etc/xray/config.json   # подставить свои значения 
 ### 3. Скрипты службы
 
 ```sh
-cp fw.sh       /opt/etc/xray/fw.sh
-cp S99vlessfw  /opt/etc/init.d/S99vlessfw
-cp watchdog.sh /opt/etc/xray/watchdog.sh
-cp mon.sh      /opt/etc/xray/mon.sh
-chmod +x /opt/etc/xray/fw.sh /opt/etc/init.d/S99vlessfw /opt/etc/xray/watchdog.sh
-# подсети сегментов настраиваются в начале fw.sh (переменная SEGS)
+cp fw.sh             /opt/etc/xray/fw.sh
+cp S99vlessfw        /opt/etc/init.d/S99vlessfw
+cp watchdog_loop.sh  /opt/etc/xray/watchdog_loop.sh
+cp phone-mon.sh      /opt/etc/xray/phone-mon.sh
+cp cron-restart.sh   /opt/etc/xray/cron-restart.sh
+cp S01cron           /opt/etc/init.d/S01cron
+chmod +x /opt/etc/xray/fw.sh /opt/etc/xray/watchdog_loop.sh /opt/etc/xray/phone-mon.sh \
+          /opt/etc/xray/cron-restart.sh /opt/etc/init.d/S99vlessfw /opt/etc/init.d/S01cron
+# подсети/исключения настраиваются в начале fw.sh (SEGS, DIRECT_NETS)
 /opt/etc/init.d/S99vlessfw start
 nohup sh /opt/etc/xray/mon.sh &     # датчик скорости, пишет /opt/var/log/tunnel-mon.log
 ```

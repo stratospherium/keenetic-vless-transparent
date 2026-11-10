@@ -1,0 +1,6 @@
+# Router scripts must stay LF — busybox ash breaks on CRLF ("expecting do")
+*.sh text eol=lf
+S99vlessfw text eol=lf
+S01cron text eol=lf
+*.json text eol=lf
+*.md text eol=lf
